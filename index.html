@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Gear Monitor (Cloud Web App)</title>
+<title>Pro Gear Monitor (Final Edition)</title>
 <style>
     :root {
         --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
@@ -14,7 +14,7 @@
     header { padding: 15px 25px; background: #000; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; z-index: 100; position: relative; }
     h2 { margin: 0; font-size: 22px; color: #fff; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 10px rgba(255,255,255,0.3); }
     .version-tag { color: var(--cyan); font-weight: bold; }
-    .cloud-tag { color: #0f0; font-size: 12px; vertical-align: middle; margin-left: 10px; border: 1px solid #0f0; padding: 2px 6px; border-radius: 4px; box-shadow: 0 0 8px #0f0; }
+    .local-tag { color: #fce205; font-size: 12px; vertical-align: middle; margin-left: 10px; border: 1px solid #fce205; padding: 2px 6px; border-radius: 4px; box-shadow: 0 0 8px rgba(252,226,5,0.5); }
     
     .control-group { display: flex; gap: 15px; align-items: center; }
     .sys-btn { background: transparent; color: var(--cyan); border: 1px solid var(--cyan); padding: 8px 20px; font-size: 16px; font-family: 'Consolas', monospace; font-weight: bold; cursor: pointer; transition: all 0.3s; border-radius: 4px; text-transform: uppercase; }
@@ -29,7 +29,7 @@
     
     .profile-bar { background: #0d1117; padding: 10px 25px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 15px; z-index: 90; position: relative; }
     .profile-bar span { color: var(--text); font-weight: bold; font-size: 14px; }
-    select { background: #000; color: var(--yellow); border: 1px solid var(--border); padding: 5px 10px; font-family: 'Consolas', monospace; font-size: 16px; font-weight: bold; outline: none; border-radius: 4px; min-width: 200px; }
+    select { background: #000; color: var(--yellow); border: 1px solid var(--border); padding: 5px 10px; font-family: 'Consolas', monospace; font-size: 16px; font-weight: bold; outline: none; border-radius: 4px; min-width: 200px; cursor: pointer; }
     .sys-btn.small { padding: 5px 12px; font-size: 12px; }
     
     .content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
@@ -50,17 +50,18 @@
 
     .calibration-bar { display: flex; justify-content: space-around; background: #05070a; padding: 15px; border-top: 1px solid var(--border); z-index: 100; position: relative; }
     .calib-box { text-align: center; width: 18%; }
-    .calib-btn { width: 100%; background: #1a202c; color: #fff; border: 1px solid #444; padding: 10px; font-size: 14px; font-family: 'Consolas', monospace; cursor: pointer; border-radius: 4px; }
+    .calib-btn { width: 100%; background: #1a202c; color: #fff; border: 1px solid #444; padding: 10px; font-size: 14px; font-family: 'Consolas', monospace; cursor: pointer; border-radius: 4px; transition: 0.2s; }
     .calib-btn:hover { background: #2d3748; border-color: var(--cyan); color: var(--cyan); }
     .calib-val { display: block; margin-top: 8px; color: var(--cyan); font-size: 13px; font-weight: bold; }
     .calib-val.unset { color: #555; font-weight: normal; }
-    .calib-clear { display: inline-block; margin-top: 5px; color: var(--pink); font-size: 11px; cursor: pointer; text-transform: uppercase; font-weight: bold; }
+    .calib-clear { display: inline-block; margin-top: 5px; color: var(--pink); font-size: 11px; cursor: pointer; text-transform: uppercase; font-weight: bold; padding: 2px 5px; border-radius: 3px; }
+    .calib-clear:hover { background: rgba(255,0,60,0.1); }
     .calib-clear.hide { display: none; }
 </style>
 </head>
 <body>
 <header>
-    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(WEB APP)</span><span class="cloud-tag" id="cloud-status">CONNECTING...</span></h2>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(FINAL)</span><span class="local-tag">EDGE COMPUTING</span></h2>
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
         <button id="btn-view" class="sys-btn" onclick="toggleView()">SHOW SPECTROGRAM</button>
@@ -73,13 +74,17 @@
     <select id="profile-select" onchange="switchProfile(this.value)"></select>
     <button class="sys-btn small" onclick="addProfile()">+ ADD NEW</button>
     <button class="sys-btn small active-pink" onclick="deleteProfile()">- DELETE</button>
+    
+    <button class="sys-btn small" style="margin-left:auto; color: #fff; border-color: #555;" onclick="exportData()">[💾] EXPORT DATA</button>
+    <button class="sys-btn small" style="color: #fff; border-color: #555;" onclick="document.getElementById('import-file').click()">[📂] IMPORT DATA</button>
+    <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(event)">
 </div>
 
 <div class="content-wrapper">
     <div id="view-spectrogram"><canvas id="y"></canvas><canvas id="spectrogram"></canvas><div style="background:#000;"></div><canvas id="x"></canvas></div>
     <div id="view-dashboard">
         <div class="panel"><div class="panel-title">Peak Frequency</div><div><span id="hz-val" class="panel-value">0</span><span class="panel-unit">Hz</span></div></div>
-        <div class="panel"><div class="panel-title">Max Volume</div><div><span id="db-val" class="panel-value db">0.0</span><span class="panel-unit">dB</span></div></div>
+        <div class="panel"><div class="panel-title">Volume (dB)</div><div><span id="db-val" class="panel-value db">0.0</span><span class="panel-unit">dB</span></div></div>
         <div class="panel"><div class="panel-title">Current Gear</div><div><span id="gear-val" class="panel-value gear">-</span></div></div>
     </div>
 </div>
@@ -92,66 +97,49 @@
     <div class="calib-box"><button class="calib-btn" onclick="recordGear('5')">Rec Gear 5</button><span class="calib-val unset" id="target-5">Not Set</span><span class="calib-clear hide" id="clear-5" onclick="clearGear('5')">[X] Reset</span></div>
 </div>
 
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-    import { getDatabase, ref, set, onValue, get, child } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
-
+<script>
     // ==========================================
-    // 🚨 1. 把你在 Firebase 拿到的設定貼在這裡 🚨
+    // 1. Local Storage Database Management
     // ==========================================
-    const firebaseConfig = {
-        apiKey: "YOUR_API_KEY",
-        authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-        databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "YOUR_PROJECT_ID",
-        storageBucket: "YOUR_PROJECT_ID.appspot.com",
-        messagingSenderId: "123456789",
-        appId: "YOUR_APP_ID"
-    };
-
-    // Initialize Firebase
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-    const dbRef = ref(db, 'gear_db');
-
-    // App State
     let dbData = {"Device A": {"1": [], "2": [], "3": [], "4": [], "5": []}};
     let activeProfile = "Device A";
-    
-    // Sync with Cloud
-    onValue(dbRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            dbData = data;
-            document.getElementById('cloud-status').innerText = "CLOUD SYNCED";
-            if (!dbData[activeProfile]) activeProfile = Object.keys(dbData)[0];
+    const DB_KEY = "pro_gear_db_v11";
+
+    function loadData() {
+        try {
+            const saved = localStorage.getItem(DB_KEY);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Object.keys(parsed).length > 0) {
+                    dbData = parsed;
+                    activeProfile = Object.keys(dbData)[0];
+                }
+            }
+        } catch (e) {
+            console.error("Local storage load error", e);
+        }
+    }
+
+    function saveData() {
+        try {
+            localStorage.setItem(DB_KEY, JSON.stringify(dbData));
             updateUI();
-        } else {
-            set(dbRef, dbData); // Create default if empty
-        }
-    });
-
-    window.saveToCloud = function() { set(dbRef, dbData); }
-
-    window.switchProfile = function(name) { activeProfile = name; currentGear = "-"; updateUI(); }
-    window.addProfile = function() {
-        let name = prompt("Enter new device name:");
-        if (name && !dbData[name]) { dbData[name] = {"1": [], "2": [], "3": [], "4": [], "5": []}; activeProfile = name; saveToCloud(); }
-    }
-    window.deleteProfile = function() {
-        if (Object.keys(dbData).length > 1 && confirm(`Delete profile: ${activeProfile}?`)) {
-            delete dbData[activeProfile];
-            activeProfile = Object.keys(dbData)[0];
-            saveToCloud();
+        } catch (e) {
+            console.error("Local storage save error", e);
         }
     }
-    window.recordGear = function(g) { if (latestPeakFreq > 0) { dbData[activeProfile][g].push(latestPeakFreq); saveToCloud(); } }
-    window.clearGear = function(g) { dbData[activeProfile][g] = []; saveToCloud(); }
+
+    loadData(); // Load on startup
 
     function updateUI() {
         const sel = document.getElementById('profile-select');
-        sel.innerHTML = '';
-        Object.keys(dbData).forEach(p => { let opt = new Option(p, p); sel.add(opt); });
+        const currentProfiles = Array.from(sel.options).map(o => o.value).join(',');
+        const newProfiles = Object.keys(dbData).join(',');
+
+        if (currentProfiles !== newProfiles) {
+            sel.innerHTML = '';
+            Object.keys(dbData).forEach(p => { let opt = new Option(p, p); sel.add(opt); });
+        }
         sel.value = activeProfile;
 
         for (let i = 1; i <= 5; i++) {
@@ -168,12 +156,79 @@
             }
         }
     }
+    updateUI(); // Initial UI render
 
     // ==========================================
-    // 2. Web Audio API (代替 Python 的 FFT)
+    // 2. Export / Import Functions
     // ==========================================
-    let audioCtx, analyser, dataArray, freqBins;
-    let latestPeakFreq = 0, latestPeakDb = 0, currentGear = "-", candidateGear = "-", candidateTime = 0;
+    window.exportData = function() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dbData, null, 4));
+        const dlAnchorElem = document.createElement('a');
+        dlAnchorElem.setAttribute("href", dataStr);
+        dlAnchorElem.setAttribute("download", "pro_gear_backup.json");
+        dlAnchorElem.click();
+    };
+
+    window.importData = function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if (imported && Object.keys(imported).length > 0) {
+                    dbData = imported;
+                    activeProfile = Object.keys(dbData)[0];
+                    saveData();
+                    alert("SUCCESS: Data imported perfectly!");
+                }
+            } catch (err) {
+                alert("ERROR: Invalid JSON configuration file.");
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = ''; // Reset file input
+    };
+
+    // ==========================================
+    // 3. UI Interactions
+    // ==========================================
+    window.switchProfile = function(name) { activeProfile = name; window.currentGear = "-"; updateUI(); }
+    window.addProfile = function() {
+        let name = prompt("Enter new device name (English only):");
+        if (name && name.trim() !== "" && !dbData[name]) { 
+            dbData[name] = {"1": [], "2": [], "3": [], "4": [], "5": []}; 
+            activeProfile = name; 
+            saveData(); 
+        }
+    }
+    window.deleteProfile = function() {
+        if (Object.keys(dbData).length > 1 && confirm(`Delete profile: ${activeProfile}?`)) {
+            delete dbData[activeProfile];
+            activeProfile = Object.keys(dbData)[0];
+            saveData();
+        }
+    }
+    window.recordGear = function(g) { 
+        if (window.latestPeakFreq > 0) { 
+            dbData[activeProfile][g].push(window.latestPeakFreq); 
+            saveData(); 
+        } 
+    }
+    window.clearGear = function(g) { 
+        dbData[activeProfile][g] = []; 
+        saveData(); 
+    }
+
+    // ==========================================
+    // 4. Web Audio API (FFT & Signal Processing)
+    // ==========================================
+    let audioCtx, analyser, dataArray;
+    window.latestPeakFreq = 0; 
+    let latestPeakDb = 0, candidateTime = 0;
+    window.currentGear = "-";
+    let candidateGear = "-";
+    
     const DISPLAY_MAX_FREQ = 300, NOISE_GATE_DB = -50, TOLERANCE = 10, HOLD_TIME = 2000;
 
     const cvsM=document.getElementById('spectrogram'), ctxM=cvsM.getContext('2d',{willReadFrequently:true});
@@ -198,7 +253,7 @@
             document.getElementById('led').className = 'led on';
             document.getElementById('status-text').innerText = 'LISTENING';
             resize(); renderFrame();
-        } catch (err) { alert("Mic access denied or error: " + err); }
+        } catch (err) { alert("Mic access denied. Please allow microphone permissions."); }
     }
 
     window.toggleView = function() {
@@ -218,7 +273,7 @@
     window.addEventListener('resize', resize);
 
     function getColor(dbVal) {
-        let norm = (dbVal + 100) / 70; // Normalize -100dB~-30dB to 0~1
+        let norm = (dbVal + 100) / 70; 
         if (norm < 0) norm = 0; if (norm > 1) norm = 1;
         let r, g, b;
         if(norm<0.25){let t=norm/0.25;r=1+t*79;g=1+t*17;b=13+t*110;}
@@ -240,16 +295,16 @@
         }
 
         latestPeakDb = maxDb;
-        latestPeakFreq = (maxDb > NOISE_GATE_DB) ? peakIdx * hzPerBin : 0;
+        window.latestPeakFreq = (maxDb > NOISE_GATE_DB) ? peakIdx * hzPerBin : 0;
 
         let detectedGear = "0";
-        if (latestPeakFreq > 0 && dbData[activeProfile]) {
+        if (window.latestPeakFreq > 0 && dbData[activeProfile]) {
             let minDiff = TOLERANCE + 1, closest = "-";
             for (let i = 1; i <= 5; i++) {
                 const arr = dbData[activeProfile][i.toString()];
                 if (arr && arr.length > 0) {
                     const avg = arr.reduce((a,b)=>a+b)/arr.length;
-                    const diff = Math.abs(latestPeakFreq - avg);
+                    const diff = Math.abs(window.latestPeakFreq - avg);
                     if (diff <= TOLERANCE && diff < minDiff) { minDiff = diff; closest = i.toString(); }
                 }
             }
@@ -257,12 +312,17 @@
         }
 
         if (detectedGear !== candidateGear) { candidateGear = detectedGear; candidateTime = Date.now(); }
-        else if (Date.now() - candidateTime >= HOLD_TIME) { currentGear = detectedGear; }
+        else if (Date.now() - candidateTime >= HOLD_TIME) { window.currentGear = detectedGear; }
 
-        // Update Dashboard
-        document.getElementById('hz-val').innerText = latestPeakFreq === 0 ? "0" : Math.round(latestPeakFreq);
-        document.getElementById('db-val').innerText = (latestPeakDb === -Infinity) ? "0" : latestPeakDb.toFixed(1);
-        document.getElementById('gear-val').innerText = currentGear;
+        // Dash UI Update
+        document.getElementById('hz-val').innerText = window.latestPeakFreq === 0 ? "0" : Math.round(window.latestPeakFreq);
+        
+        // Offset negative dB to positive
+        let displayDb = (latestPeakDb === -Infinity) ? 0 : (latestPeakDb + 100);
+        if (displayDb < 0) displayDb = 0;
+        document.getElementById('db-val').innerText = displayDb.toFixed(1);
+        
+        document.getElementById('gear-val').innerText = window.currentGear;
 
         // Draw Spectrogram
         if (bufferCvs.width > 0) {
