@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro Gear Monitor (Cloud Web App)</title>
+<style>
+    :root {
+        --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
+        --cyan: #00f3ff; --pink: #ff003c; --yellow: #fce205; --text: #c9d1d9;
+    }
+    body { background: var(--bg); color: var(--text); margin: 0; font-family: 'Consolas', monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    
+    header { padding: 15px 25px; background: #000; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; z-index: 100; position: relative; }
+    h2 { margin: 0; font-size: 22px; color: #fff; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 10px rgba(255,255,255,0.3); }
+    .version-tag { color: var(--cyan); font-weight: bold; }
+    .cloud-tag { color: #0f0; font-size: 12px; vertical-align: middle; margin-left: 10px; border: 1px solid #0f0; padding: 2px 6px; border-radius: 4px; box-shadow: 0 0 8px #0f0; }
+    
+    .control-group { display: flex; gap: 15px; align-items: center; }
+    .sys-btn { background: transparent; color: var(--cyan); border: 1px solid var(--cyan); padding: 8px 20px; font-size: 16px; font-family: 'Consolas', monospace; font-weight: bold; cursor: pointer; transition: all 0.3s; border-radius: 4px; text-transform: uppercase; }
+    .sys-btn:hover { background: var(--cyan); color: #000; box-shadow: 0 0 15px var(--cyan); }
+    .sys-btn.active-pink { color: var(--pink); border-color: var(--pink); }
+    .sys-btn.active-pink:hover { background: var(--pink); color: #fff; box-shadow: 0 0 15px var(--pink); }
+    
+    .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #888; }
+    .led { width: 12px; height: 12px; border-radius: 50%; background: #333; display: inline-block; }
+    .led.on { background: #0f0; box-shadow: 0 0 10px #0f0; }
+    .led.paused { background: var(--yellow); box-shadow: 0 0 10px var(--yellow); }
+    
+    .profile-bar { background: #0d1117; padding: 10px 25px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 15px; z-index: 90; position: relative; }
+    .profile-bar span { color: var(--text); font-weight: bold; font-size: 14px; }
+    select { background: #000; color: var(--yellow); border: 1px solid var(--border); padding: 5px 10px; font-family: 'Consolas', monospace; font-size: 16px; font-weight: bold; outline: none; border-radius: 4px; min-width: 200px; }
+    .sys-btn.small { padding: 5px 12px; font-size: 12px; }
+    
+    .content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
+    
+    #view-spectrogram { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: grid; grid-template-columns: 50px 1fr; grid-template-rows: 1fr 25px; background: #000; z-index: 1; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #spectrogram { image-rendering: pixelated; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    
+    #view-dashboard { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: space-around; align-items: center; background: var(--bg); padding: 20px; box-sizing: border-box; gap: 20px; z-index: 10; transition: opacity 0.4s ease; }
+    #view-dashboard.hidden { opacity: 0; pointer-events: none; }
+    
+    .panel { text-align: center; flex: 1; background: var(--panel); padding: 40px 20px; border-radius: 12px; border: 1px solid var(--border); box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
+    .panel-title { font-size: 18px; color: #777; text-transform: uppercase; letter-spacing: 4px; margin-bottom: 30px; }
+    .panel-value { font-size: 90px; font-weight: bold; color: var(--cyan); text-shadow: 0 0 30px rgba(0,243,255,0.4); }
+    .panel-value.db { color: var(--pink); text-shadow: 0 0 30px rgba(255,0,60,0.4); }
+    .panel-value.gear { color: var(--yellow); text-shadow: 0 0 30px rgba(252,226,5,0.4); }
+    .panel-unit { font-size: 24px; color: #666; margin-left: 10px; }
+
+    .calibration-bar { display: flex; justify-content: space-around; background: #05070a; padding: 15px; border-top: 1px solid var(--border); z-index: 100; position: relative; }
+    .calib-box { text-align: center; width: 18%; }
+    .calib-btn { width: 100%; background: #1a202c; color: #fff; border: 1px solid #444; padding: 10px; font-size: 14px; font-family: 'Consolas', monospace; cursor: pointer; border-radius: 4px; }
+    .calib-btn:hover { background: #2d3748; border-color: var(--cyan); color: var(--cyan); }
+    .calib-val { display: block; margin-top: 8px; color: var(--cyan); font-size: 13px; font-weight: bold; }
+    .calib-val.unset { color: #555; font-weight: normal; }
+    .calib-clear { display: inline-block; margin-top: 5px; color: var(--pink); font-size: 11px; cursor: pointer; text-transform: uppercase; font-weight: bold; }
+    .calib-clear.hide { display: none; }
+</style>
+</head>
+<body>
+<header>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(WEB APP)</span><span class="cloud-tag" id="cloud-status">CONNECTING...</span></h2>
+    <div class="control-group">
+        <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
+        <button id="btn-view" class="sys-btn" onclick="toggleView()">SHOW SPECTROGRAM</button>
+        <div class="status"><span class="led" id="led"></span><span id="status-text">OFFLINE</span></div>
+    </div>
+</header>
+
+<div class="profile-bar">
+    <span>DEVICE PROFILE: </span>
+    <select id="profile-select" onchange="switchProfile(this.value)"></select>
+    <button class="sys-btn small" onclick="addProfile()">+ ADD NEW</button>
+    <button class="sys-btn small active-pink" onclick="deleteProfile()">- DELETE</button>
+</div>
+
+<div class="content-wrapper">
+    <div id="view-spectrogram"><canvas id="y"></canvas><canvas id="spectrogram"></canvas><div style="background:#000;"></div><canvas id="x"></canvas></div>
+    <div id="view-dashboard">
+        <div class="panel"><div class="panel-title">Peak Frequency</div><div><span id="hz-val" class="panel-value">0</span><span class="panel-unit">Hz</span></div></div>
+        <div class="panel"><div class="panel-title">Max Volume</div><div><span id="db-val" class="panel-value db">0.0</span><span class="panel-unit">dB</span></div></div>
+        <div class="panel"><div class="panel-title">Current Gear</div><div><span id="gear-val" class="panel-value gear">-</span></div></div>
+    </div>
+</div>
+
+<div class="calibration-bar" id="calib-bar">
+    <div class="calib-box"><button class="calib-btn" onclick="recordGear('1')">Rec Gear 1</button><span class="calib-val unset" id="target-1">Not Set</span><span class="calib-clear hide" id="clear-1" onclick="clearGear('1')">[X] Reset</span></div>
+    <div class="calib-box"><button class="calib-btn" onclick="recordGear('2')">Rec Gear 2</button><span class="calib-val unset" id="target-2">Not Set</span><span class="calib-clear hide" id="clear-2" onclick="clearGear('2')">[X] Reset</span></div>
+    <div class="calib-box"><button class="calib-btn" onclick="recordGear('3')">Rec Gear 3</button><span class="calib-val unset" id="target-3">Not Set</span><span class="calib-clear hide" id="clear-3" onclick="clearGear('3')">[X] Reset</span></div>
+    <div class="calib-box"><button class="calib-btn" onclick="recordGear('4')">Rec Gear 4</button><span class="calib-val unset" id="target-4">Not Set</span><span class="calib-clear hide" id="clear-4" onclick="clearGear('4')">[X] Reset</span></div>
+    <div class="calib-box"><button class="calib-btn" onclick="recordGear('5')">Rec Gear 5</button><span class="calib-val unset" id="target-5">Not Set</span><span class="calib-clear hide" id="clear-5" onclick="clearGear('5')">[X] Reset</span></div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue, get, child } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // ==========================================
+    // 🚨 1. 把你在 Firebase 拿到的設定貼在這裡 🚨
+    // ==========================================
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+        databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_PROJECT_ID.appspot.com",
+        messagingSenderId: "123456789",
+        appId: "YOUR_APP_ID"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const dbRef = ref(db, 'gear_db');
+
+    // App State
+    let dbData = {"Device A": {"1": [], "2": [], "3": [], "4": [], "5": []}};
+    let activeProfile = "Device A";
+    
+    // Sync with Cloud
+    onValue(dbRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            dbData = data;
+            document.getElementById('cloud-status').innerText = "CLOUD SYNCED";
+            if (!dbData[activeProfile]) activeProfile = Object.keys(dbData)[0];
+            updateUI();
+        } else {
+            set(dbRef, dbData); // Create default if empty
+        }
+    });
+
+    window.saveToCloud = function() { set(dbRef, dbData); }
+
+    window.switchProfile = function(name) { activeProfile = name; currentGear = "-"; updateUI(); }
+    window.addProfile = function() {
+        let name = prompt("Enter new device name:");
+        if (name && !dbData[name]) { dbData[name] = {"1": [], "2": [], "3": [], "4": [], "5": []}; activeProfile = name; saveToCloud(); }
+    }
+    window.deleteProfile = function() {
+        if (Object.keys(dbData).length > 1 && confirm(`Delete profile: ${activeProfile}?`)) {
+            delete dbData[activeProfile];
+            activeProfile = Object.keys(dbData)[0];
+            saveToCloud();
+        }
+    }
+    window.recordGear = function(g) { if (latestPeakFreq > 0) { dbData[activeProfile][g].push(latestPeakFreq); saveToCloud(); } }
+    window.clearGear = function(g) { dbData[activeProfile][g] = []; saveToCloud(); }
+
+    function updateUI() {
+        const sel = document.getElementById('profile-select');
+        sel.innerHTML = '';
+        Object.keys(dbData).forEach(p => { let opt = new Option(p, p); sel.add(opt); });
+        sel.value = activeProfile;
+
+        for (let i = 1; i <= 5; i++) {
+            const arr = dbData[activeProfile][i.toString()];
+            const el = document.getElementById('target-' + i);
+            const clr = document.getElementById('clear-' + i);
+            if (arr && arr.length > 0) {
+                const avg = arr.reduce((a, b) => a + b) / arr.length;
+                el.innerText = `Avg: ${Math.round(avg)} Hz (${arr.length} logs)`;
+                el.classList.remove('unset'); clr.classList.remove('hide');
+            } else {
+                el.innerText = "Not Set";
+                el.classList.add('unset'); clr.classList.add('hide');
+            }
+        }
+    }
+
+    // ==========================================
+    // 2. Web Audio API (代替 Python 的 FFT)
+    // ==========================================
+    let audioCtx, analyser, dataArray, freqBins;
+    let latestPeakFreq = 0, latestPeakDb = 0, currentGear = "-", candidateGear = "-", candidateTime = 0;
+    const DISPLAY_MAX_FREQ = 300, NOISE_GATE_DB = -50, TOLERANCE = 10, HOLD_TIME = 2000;
+
+    const cvsM=document.getElementById('spectrogram'), ctxM=cvsM.getContext('2d',{willReadFrequently:true});
+    const bufferCvs = document.createElement('canvas'), bufferCtx = bufferCvs.getContext('2d');
+    const cvsY=document.getElementById('y'), ctxY=cvsY.getContext('2d');
+    const cvsX=document.getElementById('x'), ctxX=cvsX.getContext('2d');
+    let isDashboardVisible = true, isMicActive = false;
+
+    window.startMic = async function() {
+        if (isMicActive) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 16384; 
+            source.connect(analyser);
+            dataArray = new Float32Array(analyser.frequencyBinCount);
+            isMicActive = true;
+            document.getElementById('btn-mic').innerText = "MIC ACTIVE";
+            document.getElementById('btn-mic').classList.add('active-pink');
+            document.getElementById('led').className = 'led on';
+            document.getElementById('status-text').innerText = 'LISTENING';
+            resize(); renderFrame();
+        } catch (err) { alert("Mic access denied or error: " + err); }
+    }
+
+    window.toggleView = function() {
+        isDashboardVisible = !isDashboardVisible;
+        document.getElementById('view-dashboard').className = isDashboardVisible ? '' : 'hidden';
+        document.getElementById('btn-view').innerText = isDashboardVisible ? "SHOW SPECTROGRAM" : "SHOW DASHBOARD";
+    }
+
+    function resize(){ 
+        const w = cvsM.clientWidth || window.innerWidth - 50, h = cvsM.clientHeight || window.innerHeight - 250;
+        bufferCvs.width = w; bufferCvs.height = h; cvsM.width = w; cvsM.height = h;
+        cvsY.width = cvsY.clientWidth; cvsY.height = cvsY.clientHeight; cvsX.width = cvsX.clientWidth; cvsX.height = cvsX.clientHeight;
+        ctxY.clearRect(0,0,50,cvsY.height); ctxY.fillStyle='#888'; ctxY.font='12px Consolas'; ctxY.textAlign='right'; ctxY.textBaseline='middle';
+        for(let i=0;i<=5;i++){ let y=cvsY.height-(i/5)*cvsY.height, f=Math.round((i/5)*DISPLAY_MAX_FREQ); if(i==0)y-=6; if(i==5)y+=6; ctxY.fillText(f,40,y); ctxY.fillRect(45,y,5,1); }
+        ctxX.clearRect(0,0,cvsX.width,25); ctxX.fillStyle='#888'; ctxX.font='12px Consolas'; ctxX.textAlign='center'; ctxX.textBaseline='top'; ctxX.fillText('TIME >>>', cvsX.width/2, 8);
+    }
+    window.addEventListener('resize', resize);
+
+    function getColor(dbVal) {
+        let norm = (dbVal + 100) / 70; // Normalize -100dB~-30dB to 0~1
+        if (norm < 0) norm = 0; if (norm > 1) norm = 1;
+        let r, g, b;
+        if(norm<0.25){let t=norm/0.25;r=1+t*79;g=1+t*17;b=13+t*110;}
+        else if(norm<0.5){let t=(norm-0.25)/0.25;r=80+t*103;g=18+t*37;b=123-t*2;}
+        else if(norm<0.75){let t=(norm-0.5)/0.25;r=183+t*69;g=55+t*82;b=121-t*24;}
+        else{let t=(norm-0.75)/0.25;r=252-t*1;g=137+t*115;b=97+t*94;}
+        return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+    }
+
+    function renderFrame() {
+        if (!isMicActive) return;
+        analyser.getFloatFrequencyData(dataArray);
+        const hzPerBin = audioCtx.sampleRate / analyser.fftSize;
+        const maxIdx = Math.ceil(DISPLAY_MAX_FREQ / hzPerBin);
+        
+        let maxDb = -Infinity, peakIdx = 0;
+        for (let i = 0; i < maxIdx; i++) {
+            if (dataArray[i] > maxDb) { maxDb = dataArray[i]; peakIdx = i; }
+        }
+
+        latestPeakDb = maxDb;
+        latestPeakFreq = (maxDb > NOISE_GATE_DB) ? peakIdx * hzPerBin : 0;
+
+        let detectedGear = "0";
+        if (latestPeakFreq > 0 && dbData[activeProfile]) {
+            let minDiff = TOLERANCE + 1, closest = "-";
+            for (let i = 1; i <= 5; i++) {
+                const arr = dbData[activeProfile][i.toString()];
+                if (arr && arr.length > 0) {
+                    const avg = arr.reduce((a,b)=>a+b)/arr.length;
+                    const diff = Math.abs(latestPeakFreq - avg);
+                    if (diff <= TOLERANCE && diff < minDiff) { minDiff = diff; closest = i.toString(); }
+                }
+            }
+            if (closest !== "-") detectedGear = closest;
+        }
+
+        if (detectedGear !== candidateGear) { candidateGear = detectedGear; candidateTime = Date.now(); }
+        else if (Date.now() - candidateTime >= HOLD_TIME) { currentGear = detectedGear; }
+
+        // Update Dashboard
+        document.getElementById('hz-val').innerText = latestPeakFreq === 0 ? "0" : Math.round(latestPeakFreq);
+        document.getElementById('db-val').innerText = (latestPeakDb === -Infinity) ? "0" : latestPeakDb.toFixed(1);
+        document.getElementById('gear-val').innerText = currentGear;
+
+        // Draw Spectrogram
+        if (bufferCvs.width > 0) {
+            const w = bufferCvs.width, h = bufferCvs.height, bH = h / maxIdx, x = w - 1;
+            const imgData = bufferCtx.getImageData(1, 0, w - 1, h);
+            bufferCtx.putImageData(imgData, 0, 0);
+            bufferCtx.clearRect(x, 0, 1, h);
+            for (let i = 0; i < maxIdx; i++) {
+                bufferCtx.fillStyle = getColor(dataArray[i]);
+                bufferCtx.fillRect(x, h - (i * bH) - bH, 1, bH + 0.5);
+            }
+            ctxM.drawImage(bufferCvs, 0, 0);
+        }
+        requestAnimationFrame(renderFrame);
+    }
+</script>
+</body>
+</html>
