@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Gear Monitor (Final Edition)</title>
+<title>Pro Gear Monitor (Final Edition V11.1)</title>
 <style>
     :root {
         --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
@@ -61,9 +61,10 @@
 </head>
 <body>
 <header>
-    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(FINAL)</span><span class="local-tag">EDGE COMPUTING</span></h2>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.1)</span><span class="local-tag">EDGE COMPUTING</span></h2>
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
+        <button id="btn-pause" class="sys-btn active-pink" onclick="togglePause()">PAUSE SYSTEM</button>
         <button id="btn-view" class="sys-btn" onclick="toggleView()">SHOW SPECTROGRAM</button>
         <div class="status"><span class="led" id="led"></span><span id="status-text">OFFLINE</span></div>
     </div>
@@ -129,7 +130,7 @@
         }
     }
 
-    loadData(); // Load on startup
+    loadData();
 
     function updateUI() {
         const sel = document.getElementById('profile-select');
@@ -156,7 +157,7 @@
             }
         }
     }
-    updateUI(); // Initial UI render
+    updateUI(); 
 
     // ==========================================
     // 2. Export / Import Functions
@@ -187,7 +188,7 @@
             }
         };
         reader.readAsText(file);
-        event.target.value = ''; // Reset file input
+        event.target.value = ''; 
     };
 
     // ==========================================
@@ -225,9 +226,10 @@
     // ==========================================
     let audioCtx, analyser, dataArray;
     window.latestPeakFreq = 0; 
-    let latestPeakDb = 0, candidateTime = 0;
+    let latestPeakDb = 0, candidateTime = 0, lastUiUpdate = 0;
     window.currentGear = "-";
     let candidateGear = "-";
+    let isPaused = false; 
     
     const DISPLAY_MAX_FREQ = 300, NOISE_GATE_DB = -50, TOLERANCE = 10, HOLD_TIME = 2000;
 
@@ -254,6 +256,23 @@
             document.getElementById('status-text').innerText = 'LISTENING';
             resize(); renderFrame();
         } catch (err) { alert("Mic access denied. Please allow microphone permissions."); }
+    }
+
+    window.togglePause = function() {
+        isPaused = !isPaused;
+        const btn = document.getElementById('btn-pause');
+        const led = document.getElementById('led');
+        const stText = document.getElementById('status-text');
+        
+        if (isPaused) {
+            btn.innerText = "RESUME SYSTEM";
+            btn.classList.remove('active-pink');
+            if (isMicActive) { led.className = 'led paused'; stText.innerText = 'PAUSED'; }
+        } else {
+            btn.innerText = "PAUSE SYSTEM";
+            btn.classList.add('active-pink');
+            if (isMicActive) { led.className = 'led on'; stText.innerText = 'LISTENING'; }
+        }
     }
 
     window.toggleView = function() {
@@ -285,6 +304,13 @@
 
     function renderFrame() {
         if (!isMicActive) return;
+        
+        // 暫停時凍結畫面與更新
+        if (isPaused) {
+            requestAnimationFrame(renderFrame);
+            return;
+        }
+
         analyser.getFloatFrequencyData(dataArray);
         const hzPerBin = audioCtx.sampleRate / analyser.fftSize;
         const maxIdx = Math.ceil(DISPLAY_MAX_FREQ / hzPerBin);
@@ -314,15 +340,18 @@
         if (detectedGear !== candidateGear) { candidateGear = detectedGear; candidateTime = Date.now(); }
         else if (Date.now() - candidateTime >= HOLD_TIME) { window.currentGear = detectedGear; }
 
-        // Dash UI Update
-        document.getElementById('hz-val').innerText = window.latestPeakFreq === 0 ? "0" : Math.round(window.latestPeakFreq);
-        
-        // Offset negative dB to positive
-        let displayDb = (latestPeakDb === -Infinity) ? 0 : (latestPeakDb + 100);
-        if (displayDb < 0) displayDb = 0;
-        document.getElementById('db-val').innerText = displayDb.toFixed(1);
-        
-        document.getElementById('gear-val').innerText = window.currentGear;
+        const now = Date.now();
+        // 視覺防抖：每 150 毫秒才更新一次數字面板，讓眼睛看得清楚
+        if (now - lastUiUpdate > 150) {
+            document.getElementById('hz-val').innerText = window.latestPeakFreq === 0 ? "0" : Math.round(window.latestPeakFreq);
+            
+            let displayDb = (latestPeakDb === -Infinity) ? 0 : (latestPeakDb + 100);
+            if (displayDb < 0) displayDb = 0;
+            document.getElementById('db-val').innerText = displayDb.toFixed(1);
+            
+            document.getElementById('gear-val').innerText = window.currentGear;
+            lastUiUpdate = now;
+        }
 
         // Draw Spectrogram
         if (bufferCvs.width > 0) {
