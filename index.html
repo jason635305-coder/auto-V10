@@ -258,17 +258,21 @@ const FFT_SIZE = 16384;
 const MAX_SEARCH_HZ = 300;
 const CALIBRATION_OFFSET = 70;
 
-// ⚠️ 重要：請將下方的 URL 換成你的 Google Apps Script 網頁應用程式網址 ⚠️
+// ⚠️ 重要：請將下方的 URL 換成你的 Google Apps Script 網址 ⚠️
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyoDVBAaCHGrYNorcKSGWOK6hcAlLHf759Dw-exn59LYxjXp1-NsUyO0YU5XbBzHMvc/exec'; 
 
 let cloudProfiles = {}; 
-let activeProfileData = { '1':0, '2':0, '3':0, '4':0, '5':0 }; // 存放當前選定設備的標準值
+// 【新增】雙重基準線：絕對基準(雲端) vs 動態基準(學習)
+let goldStandardData = { '1':0, '2':0, '3':0, '4':0, '5':0 }; 
+let dynamicProfileData = { '1':0, '2':0, '3':0, '4':0, '5':0 }; 
 let tolerance = 60;
 let stabilityThreshold = 15;
 
-// 網頁載入時自動執行：連線 Google Sheets 取回設備清單
+// ==========================================
+// 初始化與雲端連線
+// ==========================================
 window.addEventListener('DOMContentLoaded', async () => {
-    renderCalibBar(); // 初始渲染空的 UI
+    renderCalibBar(); 
     try {
         const response = await fetch(WEB_APP_URL);
         cloudProfiles = await response.json();
@@ -276,9 +280,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         const select = document.getElementById('cloud-profile-select');
         select.innerHTML = '<option value="">-- 請選擇測試設備 --</option>';
         
+        // 生成雲端設備清單
         Object.keys(cloudProfiles).forEach(name => {
             select.add(new Option(name, name));
         });
+        
+        // 【新增】在選單最下方加入沙盒模式選項
+        select.add(new Option("➕ 自訂設備 (本地暫存不連網)", "CUSTOM_MODE"));
         
         document.getElementById('sync-led').style.background = 'var(--green)';
         document.getElementById('sync-led').style.boxShadow = '0 0 5px var(--green)';
@@ -294,49 +302,95 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// 當使用者從下拉選單選擇設備時
+// 當使用者切換設備時
 function loadCloudProfile(deviceName) {
     if (!deviceName) {
-        activeProfileData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
+        goldStandardData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
+        dynamicProfileData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
+        renderCalibBar();
+        return;
+    }
+    
+    if (deviceName === "CUSTOM_MODE") {
+        showToast("🛠️ 進入自訂模式：點擊下方數字可自訂頻率，資料不會上傳");
+        // 清空基準，讓使用者自己填
+        goldStandardData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
+        dynamicProfileData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
         renderCalibBar();
         return;
     }
     
     // 載入該設備的 5 個檔位標準頻率
     const gears = cloudProfiles[deviceName].gears;
-    activeProfileData = {
-        '1': gears[0] || 0,
-        '2': gears[1] || 0,
-        '3': gears[2] || 0,
-        '4': gears[3] || 0,
-        '5': gears[4] || 0
+    goldStandardData = {
+        '1': gears[0] || 0, '2': gears[1] || 0, '3': gears[2] || 0, '4': gears[3] || 0, '5': gears[4] || 0
     };
+    // 複製一份給動態基準
+    dynamicProfileData = { ...goldStandardData };
     
     showToast(`🔄 已載入 [${deviceName}] 標準參數`);
     renderCalibBar();
 }
 
+// 【新增】處理使用者點擊修改頻率 (沙盒模式專用)
+function setCustomHz(gearNum) {
+    const deviceName = document.getElementById('cloud-profile-select').value;
+    if (deviceName !== "CUSTOM_MODE") {
+        return showToast("⚠️ 只有在「自訂設備」模式下才能手動修改頻率");
+    }
+    
+    const input = prompt(`請輸入第 ${gearNum} 檔的目標頻率 (Hz)：`, dynamicProfileData[gearNum] || 50);
+    const val = parseFloat(input);
+    if (!isNaN(val) && val > 0) {
+        goldStandardData[gearNum] = val; // 自訂模式下，絕對基準就是輸入值
+        dynamicProfileData[gearNum] = val;
+        renderCalibBar();
+        showToast(`🔧 第 ${gearNum} 檔已設定為 ${val} Hz`);
+    }
+}
+
 // ==========================================
-// 核心：5% 誤差計算與自動上傳 Google Sheets
+// 核心：防飄移學習與雲端上傳
 // ==========================================
 async function recordAndCheckGear(gearNum) {
     const deviceName = document.getElementById('cloud-profile-select').value;
     if (!deviceName) return showToast("⚠️ 請先從上方選擇要測試的設備");
     if (currentHz <= 0) return showToast("⚠️ 未偵測到穩定音訊訊號");
 
-    const baseHz = activeProfileData[gearNum];
-    if (!baseHz || baseHz === 0) return showToast(`❌ 該設備第 ${gearNum} 檔尚未設定雲端標準值`);
+    const goldHz = goldStandardData[gearNum];
+    if (!goldHz || goldHz === 0) return showToast(`❌ 該設備第 ${gearNum} 檔尚未設定標準值`);
 
-    // 計算誤差 %
-    const diff = Math.abs(currentHz - baseHz);
-    const errorRatio = diff / baseHz;
+    // 計算與「絕對基準」的誤差 %
+    const diff = Math.abs(currentHz - goldHz);
+    const errorRatio = diff / goldHz;
     const errorPercent = (errorRatio * 100).toFixed(2);
 
-    // 判斷邏輯：小於等於 5%
+    // 判斷邏輯：誤差小於等於 5%
     if (errorRatio <= 0.05) {
-        showToast(`🎯 準確！誤差 ${errorPercent}%，上傳雲端中...`);
         
-        // 將按鈕暫時變成綠色以示回饋
+        // 攔截點：如果是自訂模式，只顯示成功，更新動態值，但不上傳！
+        if (deviceName === "CUSTOM_MODE") {
+            dynamicProfileData[gearNum] = parseFloat(currentHz.toFixed(1));
+            renderCalibBar();
+            return showToast(`✅ [本地測試] 實測 ${currentHz.toFixed(1)}Hz，誤差 ${errorPercent}%，通過！`);
+        }
+
+        showToast(`🎯 準確！誤差 ${errorPercent}%，上傳中...`);
+        
+        // --- 核心：動態學習邏輯 ---
+        // 1. 新動態平均 (80% 舊的動態值 + 20% 本次實測值)
+        let newDynamic = (dynamicProfileData[gearNum] * 0.8) + (currentHz * 0.2);
+        
+        // 2. 防飄移鎖 (Clamp)：限制新動態值最多只能偏離出廠值 3%
+        const maxDrift = 0.03;
+        if (newDynamic > goldHz * (1 + maxDrift)) newDynamic = goldHz * (1 + maxDrift);
+        if (newDynamic < goldHz * (1 - maxDrift)) newDynamic = goldHz * (1 - maxDrift);
+        
+        dynamicProfileData[gearNum] = parseFloat(newDynamic.toFixed(1));
+        renderCalibBar(); // 更新 UI 顯示新的動態目標
+        // ------------------------
+
+        // UI 按鈕回饋
         const btn = document.getElementById(`btn-rec-${gearNum}`);
         const oldText = btn.innerHTML;
         btn.style.background = 'var(--green)'; btn.style.color = '#000'; btn.innerHTML = '✔ 上傳中';
@@ -359,9 +413,7 @@ async function recordAndCheckGear(gearNum) {
         }
     } else {
         // 誤差過大，拒絕存檔
-        showToast(`🚫 誤差過大 (${errorPercent}%)，拒絕存檔！雲端基準為 ${baseHz}Hz`);
-        
-        // 視覺警告：主畫面數值閃爍紅光
+        showToast(`🚫 誤差過大 (${errorPercent}%)，拒絕存檔！出廠基準為 ${goldHz}Hz`);
         const hzText = document.getElementById('hz-val');
         hzText.style.color = 'var(--pink)';
         hzText.style.textShadow = '0 0 20px var(--pink)';
@@ -460,7 +512,6 @@ function togglePause() {
     document.getElementById('status-text').textContent = isPaused ? 'PAUSED' : 'ONLINE';
 }
 
-// INIT UI ELEMENTS
 const miniBarsEl = document.getElementById('mini-bars');
 for (let i = 0; i < 32; i++) miniBarsEl.appendChild(document.createElement('div')).className = 'mini-bar';
 const miniBarEls = miniBarsEl.querySelectorAll('.mini-bar');
@@ -493,9 +544,10 @@ function drawLoop() {
 
         if (isPsoRecording && !silent && smoothed > 0) psoBuffer.push(smoothed);
 
-        // UI Update
         document.getElementById('hz-val').textContent = silent ? '—' : currentHz.toFixed(1);
         document.getElementById('db-val').textContent = currentDb.toFixed(1);
+        
+        // 【變更】用學習過後的動態基準來自動判斷檔位
         autoMatchCloudGear(silent ? 0 : currentHz);
 
         const nyquist = audioCtx.sampleRate / 2;
@@ -537,7 +589,7 @@ function autoMatchCloudGear(hz) {
     
     let best = null, minDiff = Infinity;
     for (let i = 1; i <= MAX_GEARS; i++) {
-        const baseHz = activeProfileData[i];
+        const baseHz = dynamicProfileData[i]; // 使用動態基準來判斷
         if (baseHz > 0) {
             const diff = Math.abs(hz - baseHz);
             if (diff < tolerance && diff < minDiff) { minDiff = diff; best = i; }
@@ -551,20 +603,22 @@ function autoMatchCloudGear(hz) {
 function renderCalibBar() {
     const bar = document.getElementById('calib-bar'); bar.innerHTML = '';
     for (let i = 1; i <= MAX_GEARS; i++) {
-        const targetHz = activeProfileData[i];
+        // 【變更】UI 顯示學習過後的動態基準
+        const targetHz = dynamicProfileData[i];
         const hasTarget = targetHz > 0;
         
         const box = document.createElement('div'); 
         box.id = `calib-box-${i}`;
         box.className = 'calib-gear' + (hasTarget ? ' calibrated' : '');
         
+        // 【新增】 onclick="setCustomHz('${i}')" 讓數字可以點擊修改
         box.innerHTML = `
             <div class="calib-gear-top">
                 <span class="gear-num ${hasTarget?'set':''}">${i} 檔</span>
                 <button id="btn-rec-${i}" class="rec-btn" onclick="recordAndCheckGear('${i}')">● 寫入測試</button>
             </div>
-            <div class="target-hz ${hasTarget?'set':''}">
-                基準: <span id="target-val-${i}">${hasTarget ? targetHz : '---'}</span> Hz
+            <div class="target-hz ${hasTarget?'set':''}" style="cursor:pointer;" onclick="setCustomHz('${i}')" title="點擊修改基準">
+                基準: <span id="target-val-${i}">${hasTarget ? targetHz : '---'}</span> Hz ✎
             </div>
         `;
         bar.appendChild(box);
@@ -677,5 +731,3 @@ function buildHzScale() {
 }
 buildHzScale(); window.addEventListener('resize', buildHzScale);
 </script>
-</body>
-</html>
